@@ -1,0 +1,71 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_REGISTRY = "your-dockerhub-username"
+        DOCKER_IMAGE = "my-node-app"
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: 'main', url: 'https://github.com/your-repo.git'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh 'npm test'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                docker build -t $DOCKER_REGISTRY/$DOCKER_IMAGE:latest .
+                """
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', 
+                              usernameVariable: 'DOCKER_USER', 
+                              passwordVariable: 'DOCKER_PASS')]) {
+                    sh """
+                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                    docker push $DOCKER_REGISTRY/$DOCKER_IMAGE:latest
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to Server') {
+            steps {
+                sshagent(['ssh-server-credentials']) {
+                    sh """
+                    ssh user@your-server-ip 'docker pull $DOCKER_REGISTRY/$DOCKER_IMAGE:latest && \
+                                             docker stop node-app || true && \
+                                             docker rm node-app || true && \
+                                             docker run -d --name node-app -p 3000:3000 $DOCKER_REGISTRY/$DOCKER_IMAGE:latest'
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
